@@ -5,35 +5,45 @@
 \chapter{\IfLanguageName{dutch}{Inleiding}{Introduction}}%
 \label{ch:inleiding}
 
-De inleiding moet de lezer net genoeg informatie verschaffen om het onderwerp te begrijpen en in te zien waarom de onderzoeksvraag de moeite waard is om te onderzoeken. In de inleiding ga je literatuurverwijzingen beperken, zodat de tekst vlot leesbaar blijft. Je kan de inleiding verder onderverdelen in secties als dit de tekst verduidelijkt. Zaken die aan bod kunnen komen in de inleiding~\autocite{Pollefliet2011}:
+Arguably the most important factor of a modern applications is its safety. Part of ensuring that is making sure the users are authenticated in a proper way. These applications increasingly use different types of ways to authenticate a user. The most commonly used methods are listed by \textcite{Hassan2017}: Session based, token based, passwordless, single sign on, social sign-in and two-factor authentication. In another article, \textcite{Maayan} concludes: `Authentication technology is always changing. Businesses have to move beyond passwords and think of authentication as a means of enhancing user experience. As a result of enhanced authentication methods and technologies, attackers will not be able to exploit passwords, and a data breach will be prevented`.
 
-\begin{itemize}
-  \item context, achtergrond
-  \item afbakenen van het onderwerp
-  \item verantwoording van het onderwerp, methodologie
-  \item probleemstelling
-  \item onderzoeksdoelstelling
-  \item onderzoeksvraag
-  \item \ldots
-\end{itemize}
+For the developer, this means keeping track of the latest technologies and how to implement them into new projects. This fact makes it very difficult to choose a fitting authentication technology right at the beginning stages of development. In other cases it might be that for example higher ups from corporate want a simple version at first, so that test users can ultimately decide what technology should be used in the final product. Of course in these cases it is not an option to wait around for those results and waste time by contemplating about this decision.
+
+Imagine a scenario. The development of a new high-tech webshop app is halfway done. In the beginning the developers decided on two-factor authentication as the way to go for this specific project. At this time they are busy debugging a certain issue with the shopping cart. They want to test the newly written code, so they log in as a regular user first, put a product in the shopping cart, log back out again, log back in as an admin, change some information of the product, and then log back in as a regular user to see if the app is performing as it is supposed to. This appears to be a frustrating process that should be able to be done quicker.
+
+All of these cases are examples of where a fake authentication service could help progress by quite a bit. If developed correctly, this service could switch the type of user with just the click of one button, instead of having to go through the entire login process.
 
 \section{\IfLanguageName{dutch}{Probleemstelling}{Problem Statement}}%
 \label{sec:probleemstelling}
 
-Uit je probleemstelling moet duidelijk zijn dat je onderzoek een meerwaarde heeft voor een concrete doelgroep. De doelgroep moet goed gedefinieerd en afgelijnd zijn. Doelgroepen als ``bedrijven,'' ``KMO's'', systeembeheerders, enz.~zijn nog te vaag. Als je een lijstje kan maken van de personen/organisaties die een meerwaarde zullen vinden in deze bachelorproef (dit is eigenlijk je steekproefkader), dan is dat een indicatie dat de doelgroep goed gedefinieerd is. Dit kan een enkel bedrijf zijn of zelfs één persoon (je co-promotor/opdrachtgever).
+As mentioned before, not having a straight answer to what type of authentication will be used in an app or using one that will take up time in the development process can ben a time costly procedure. This of course is something companies want to avoid. It can partly be resolved by planning ahead of time, and going over the possible options before starting development. Unfortunately though plans do sometimes change, and to then throw a big part of the authentication overboard is not ideal.
+
+The advantages and disadvantages of early and late implementation of the authentication service are looked at from the standpoint of the developer.
 
 \section{\IfLanguageName{dutch}{Onderzoeksvraag}{Research question}}%
 \label{sec:onderzoeksvraag}
+
+%TODO
 
 Wees zo concreet mogelijk bij het formuleren van je onderzoeksvraag. Een onderzoeksvraag is trouwens iets waar nog niemand op dit moment een antwoord heeft (voor zover je kan nagaan). Het opzoeken van bestaande informatie (bv. ``welke tools bestaan er voor deze toepassing?'') is dus geen onderzoeksvraag. Je kan de onderzoeksvraag verder specifiëren in deelvragen. Bv.~als je onderzoek gaat over performantiemetingen, dan 
 
 \section{\IfLanguageName{dutch}{Onderzoeksdoelstelling}{Research objective}}%
 \label{sec:onderzoeksdoelstelling}
 
-Wat is het beoogde resultaat van je bachelorproef? Wat zijn de criteria voor succes? Beschrijf die zo concreet mogelijk. Gaat het bv.\ om een proof-of-concept, een prototype, een verslag met aanbevelingen, een vergelijkende studie, enz.
+The objective of this thesis is to have two working prototype NuGet-packages, one for client-side, one for server-side, that can be downloaded and applied to any ASP.NET-application. These packages should be able to provide the following:
+
+\begin{itemize}
+    \item switching between authentication methods
+    \item adding as many personalized types of users as needed
+    \item identify if a user is logged in
+    \item registering a new user
+    \item logging in as a user
+    \item personalize information stored of user
+\end{itemize}
 
 \section{\IfLanguageName{dutch}{Opzet van deze bachelorproef}{Structure of this bachelor thesis}}%
 \label{sec:opzet-bachelorproef}
+
 
 % Het is gebruikelijk aan het einde van de inleiding een overzicht te
 % geven van de opbouw van de rest van de tekst. Deze sectie bevat al een aanzet

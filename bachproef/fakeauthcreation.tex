@@ -1,0 +1,731 @@
+\chapter{Fake authentication creation}
+\label{ch:fake-auth2}
+
+After all this research, it is finally time to start coding the fake authentication packages. In this chapter the application that the packages was initially made around and tested for is clarified. This simple webshop was created for the course Enterprise Web C\#, given by Mr. Vertonghen to students at Hogeschool Gent. After this, the flow of data in the packages is described. Then the three different projects created are looked at in detail, to find out the magic behind the packages.
+
+\section{Initial application}
+
+As said before, the initial application that was used to create the packages is a simple webshop called The Bogus Store. It was created by Mr. Vertonghen for the course Enterprise Web C\# at Hogeschool Gent to teach students how to create applications in .Net. The repository can be found at \href{https://github.com/HOGENT-Web/csharp-ch-8-example-2}{this repository}. The reason this specific version of the application was used, is that it had a couple of nice looking pages on the client side, but also had a fake authentication that is used. The solution-branch was used since this had a couple extra features handy for testing the new fake authentication.
+
+The application itself is a webshop, where users can view a list products, view the details of these products and then decide to put these in a shopping cart and order them. The functionality of ordering isn't implemented. There are different roles or personas available for choosing. These roles are displayed in a list, and thanks to a fake authentication that is already in place, these can be switched between very easily. When choosing the Administrator persona, it is apparent that two more tabs open up in the menu, Tags and Customers. These two routes are protected and only the Administrator, who of course has a role of the same name, can access these routes. This means that when these routes are accessed by anyone else, a `Not authorized` message pops up.
+
+\subsection{Fake authentication}
+
+In this application, a fake authentication is already in place. Let's run through how this works exactly.
+
+\subsubsection{Client}
+
+When starting up a client a singleton FakeAuthenticationProvider is set in the Program.cs file. This means only a single instance of itself is created, which can then be injected into other classes, so that whenever a FakeAuthenticationProvider object has to be used, it comes back to that particular instance. This FakeAuthenticationProvider is a derived class of AuthenticationStateProvider, which is a class of the Microsoft.AspNetCore.Components.Authorization package that provides information about the authentication state of a user.
+
+\begin{verbatim}
+    builder.Services.AddSingleton<FakeAuthenticationProvider>();
+    builder.Services.AddScoped<AuthenticationStateProvider>(provider => provider.GetRequiredService<FakeAuthenticationProvider>());
+    builder.Services.AddTransient<FakeAuthorizationMessageHandler>();
+    
+    builder.Services.AddHttpClient("Project.ServerAPI", client => client.BaseAddress = new Uri(builder.HostEnvironment.BaseAddress))
+    .AddHttpMessageHandler<FakeAuthorizationMessageHandler>();
+\end{verbatim}
+
+This class looks like the following:
+
+\begin{verbatim}
+    public class FakeAuthenticationProvider : AuthenticationStateProvider
+    {
+        public static ClaimsPrincipal Anonymous => new(new ClaimsIdentity(new[]
+        {
+            new Claim(ClaimTypes.Name, "Anonymous"),
+        }));
+        
+        public static ClaimsPrincipal Administrator => new(new ClaimsIdentity(new[]
+        {
+            new Claim(ClaimTypes.NameIdentifier, "1"),
+            new Claim(ClaimTypes.Name, "Administrator"),
+            new Claim(ClaimTypes.Email, "fake-administrator@gmail.com"),
+            new Claim(ClaimTypes.Role, Roles.Administrator),
+        }, "Fake Authentication"));
+        
+        public static ClaimsPrincipal Customer => new(new ClaimsIdentity(new[]
+        {
+            new Claim(ClaimTypes.NameIdentifier, "2"),
+            new Claim(ClaimTypes.Name, "Customer"),
+            new Claim(ClaimTypes.Email, "fake-customer@gmail.com"),
+            new Claim(ClaimTypes.Role, Roles.Customer),
+        }, "Fake Authentication"));
+        
+        public static IEnumerable<ClaimsPrincipal> ClaimsPrincipals =>
+            new List<ClaimsPrincipal>() { Anonymous, Customer, Administrator }; 
+        
+        public ClaimsPrincipal Current { get; private set; } = Administrator;
+        
+        public override Task<AuthenticationState> GetAuthenticationStateAsync()
+        {
+            return Task.FromResult(new AuthenticationState(Current));
+        }
+        
+        public void ChangeAuthenticationState(ClaimsPrincipal claimsPrincipal)
+        {
+            Current = claimsPrincipal;
+            NotifyAuthenticationStateChanged(GetAuthenticationStateAsync());
+        }
+    }
+\end{verbatim}
+
+In this class three ClaimsPrincipals are made, each with its own ClaimsIdentity, and with that ClaimsIdentity the Claims that belong to that particular persona. These ClaimsPrincipal objects are then gathered in a List. Also a Current ClaimsPrincipal is set, that holds the currently logged in persona. Remember that this class is made as a singleton, so all of this information is then made available to the entire application by injection. This class also has two methods. GetAuthenticationStateAsync, which is overridden from AuthenticationStateProvider and returns a new AuthenticationState with the current logged in persona and its Claims. The second method is ChangeAuthenticationState which sets the current persona to a new one and notifies the application that the authentication state has changed.
+
+After the creation of the HttpClient, a FakeAuthorizationMessageHandler is attached to it. This message handler intercepts any request sent by the client, and adds the appropriate Headers to it if the current user is not the anonymous one.
+
+\begin{verbatim}
+    public class FakeAuthorizationMessageHandler : DelegatingHandler
+    {
+        private readonly FakeAuthenticationProvider fakeAuthenticationProvider;
+        
+        public FakeAuthorizationMessageHandler(FakeAuthenticationProvider fakeAuthenticationProvider)
+        {
+            this.fakeAuthenticationProvider = fakeAuthenticationProvider;
+        }
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, System.Threading.CancellationToken cancellationToken)
+        {
+            if(fakeAuthenticationProvider.Current.Identity?.Name == FakeAuthenticationProvider.Anonymous.Identity?.Name)
+            {
+                return base.SendAsync(request, cancellationToken);
+            }
+            
+            request.Headers.Add("UserId", fakeAuthenticationProvider.Current.FindFirst(ClaimTypes.NameIdentifier)?.Value);
+            request.Headers.Add("Role", fakeAuthenticationProvider.Current.FindFirst(ClaimTypes.Role)?.Value);
+            request.Headers.Add("Email", fakeAuthenticationProvider.Current.FindFirst(ClaimTypes.Email)?.Value);
+            request.Headers.Add("Name", fakeAuthenticationProvider.Current.FindFirst(ClaimTypes.Name)?.Value);
+            return base.SendAsync(request, cancellationToken);
+        }
+    }
+\end{verbatim}
+
+At this time the current persona can be changed by calling the ChangeAuthenticationState method of the FakeAuthenticationProvider, and this is done in the AccessControl razor component. When this method is called, the menu on top changes, because of an AuthorizeView, which checks the current user for the correct role. The same can be done with a specific route by adding \texttt{@attribute [Authorize(Roles = Roles.Administrator)]} to the top of the razor file.
+
+\subsubsection{Server}
+
+In the Program.cs file authentication is added to the services by the following line of code:
+
+\begin{verbatim}
+    
+    builder.Services.AddAuthentication("Fake Authentication")
+        .AddScheme<AuthenticationSchemeOptions, FakeAuthenticationHandler>("Fake Authentication", null);
+\end{verbatim}
+
+A new FakeAuthenticationHandler object is set as the handler for this service. This FakeAuthenticationHandler is derived from the AuthenticationHandler class, which comes from the Microsoft.AspNetCore.Authentication package. This class overrides a single method called HandleAuthenticateAsync.
+
+\begin{verbatim}
+    
+    protected override async Task<AuthenticateResult> HandleAuthenticateAsync()
+    {
+        List<Claim> claims = new();
+        
+        if (Context.Request.Headers.TryGetValue("UserId", out var userId))
+        {
+            claims.Add(new Claim(ClaimTypes.NameIdentifier, userId!));
+        }
+        
+        if (Context.Request.Headers.TryGetValue("Role", out var roles))
+        {
+            claims.Add(new Claim(ClaimTypes.Role, roles!));
+        }
+        
+        if (Context.Request.Headers.TryGetValue("Email", out var email))
+        {
+            claims.Add(new Claim(ClaimTypes.Email, email!));
+        }
+        
+        if (Context.Request.Headers.TryGetValue("Name", out var name))
+        {
+            claims.Add(new Claim(ClaimTypes.Name, name!));
+        }
+        
+        if (claims.Any())
+        {
+            var identity = new ClaimsIdentity(claims, Scheme.Name);
+            var principal = new ClaimsPrincipal(identity);
+            var ticket = new AuthenticationTicket(principal, Scheme.Name);
+            return await Task.FromResult(AuthenticateResult.Success(ticket));
+        }
+        
+        return await Task.FromResult(AuthenticateResult.NoResult());
+        
+    }
+\end{verbatim}
+
+What this method does is, whenever a request comes in to the server, it searches the headers for four values (UserId, Role, Email and Name). These are the four values that were set by the client whenever a request was sent out with a current user that is not anonymous. If they are found these claims are then added to a ClaimsIdentity in a new ClaimsPrincipal. Lastly a AuthenticateResult is then returned from this ClaimsPrincipal.
+
+All that is left to do when checking whether or not a request is made by a valid user, is to add either \texttt{[HttpGet, AllowAnonymous]} or \texttt{[HttpPost, Authorize(Roles = Roles.Administrator)]} to a method in the controllers. This returns a 401 Error if the user is not authorized.
+
+\section{Flow of data}
+
+After understanding the initial situation, let's take a look at how this changed when adding the new fake authentication.
+
+Here, minimal information about the methods is given. Any code written is be looked at further in detail in the sections \ref{ch:package-server}, \ref{ch:package-client} and \ref{ch:package-shared}.
+
+When looking at the flow of data in the application now, it makes more sense to start with the server.
+
+One more thing that needs to be made clear, when talking about the 'Server' or the 'Client', the server and client of the application are meant. When talking the 'FakeAuth.Server' or the 'FakeAuth.Client', the packages of the fake authentication are meant.
+
+\subsection{Server}
+
+When starting the application, the first file that is run through is the Program.cs of the Server.
+
+\subsubsection{Program.cs}
+
+The first thought that occurs is that this package should only ever be used in development, never on production or staging. Knowing this, the if-statement that checks whether or not the app is running in development can comfortably be added. When implementing the actual authentication system, an else can be used to configure this on production or staging.
+
+Next, a singleton is added to the builder of type ITokenGeneratorService. This singleton can for now contain either a JwtTokenGeneratorService or a BasicTokenGeneratorService, but this is easily expanded upon to other token types. Both of these are derived from the ITokenGeneratorService interface. This interface implements a method called GenerateToken, that requires a FakeIdentity object and generates an object of type Token.
+
+\subsubsection{FakeIdentity}
+
+The FakeIdentity class is a class that is created to contain all information around a certain persona or role, depending on how the user wants to use the packages.
+
+This FakeIdentity contains a name, role and claims. The name and role are both set to `Anonymous` if they are not given in the creation. It has a method that checks if it is anonymous, and a method that returns a FakeIdentityDto.Index to use for data transfer. The last method turns this FakeIdentity into an object of type ClaimsIdentity, adding both its name and role to the claims.
+
+\subsubsection{Token}
+
+The Token class is a simple class that contains the token string, duration of the token, the FakeIdentity it was issued for and the type of token (for now JWT or Base64).
+
+\subsubsection{ITokenGeneratorService}
+
+Now let's circle back to the ITokenGeneratorService interface. This is the service that generates the token when given all information through a FakeIdentity object. Later a deeper look is given into how this exactly works
+
+\subsubsection{FakeAuthServerExtensions}
+
+The next step is to add the fake authentication to the Server. This is done with the FakeAuthServerExtensions static class. It only has one static method which is used in the Program.cs file of the Server. It requires two types, one derived from ITokenGeneratorService, and one from AuthenticationHandler. These should be representative of which method of encoding is chosen. For example with JWT, this would JwtTokenGeneratorService and JwtAuthenticationHandler.
+
+The AddFakeAuthentication method is used to connect the Server with the FakeAuth.Server package. This method fetches the configuration from the appsettings file of the Server, sets the FakeIdentityService needed for saving the identities and exchanging these between the Server and Client. From the configuration the JWT settings are captured and entered into a JwtConfig object if needed. This object holds the audience, issuer, key and duration needed for creating a JWT token.
+
+\subsubsection{FakeIdentityService}
+
+This class is used as a singleton, set in the AddFakeAuthentication method. It is used to store the identities set in the appsettings of the Server. Also in this service included is a method for finding the identity linked with a certain name. Lastly on creation a method is called which checks the given identities for an anonymous one. If it is not present, one is created, since an anonymous identity is necessary for the app to work, and it is a given that every application should have an anonymous identity, even if it doesn't have any rights to pages or routes.
+
+\subsubsection{FakeAuthController}
+
+The last part of the flow in the FakeAuth.Server is the FakeAuthController. This controller contains an injection of the singleton FakeIdentityService and the ITokenGeneratorService chosen in the Program.cs of the Server. This controller has two routes.
+
+The first route is a simple getter that fetches all Identities from the identity service and returns them as FakeIdentityDto.Index objects, which contain their respective names and roles.
+
+The second route is the login route, which requires the name of the identity, and returns a FakeIdentityDto.Credentials object that contains the access token, token type, expiration, name and role.
+
+\subsection{Client}
+
+Now that the Server is set up completely, let's look at what this flow looks like on the Client side.
+
+As was the case with the Server, this package is only supposed to be used in development mode, so again the if-statement for checking if the app is running in developer mode is added.
+
+In this if-statement the static method AddClientFakeAuthentication of the static class ClientExtensions is called. This method adds the FakeAuthenticationProvider as a singleton when giving it an HttpClientBuilder object.
+
+It also adds a scoped AuthenticationStateProvider of type FakeAuthenticationProvider, a transient FakeAuthorizationMessageHandler, and then add that message handler to the HttpClientBuilder. Now let's go through how all of this fits into the flow of the Client.
+
+\subsubsection{FakeAuthorizationMessageHandler}
+
+This class is derived from the DelegatingHandler class and intercepts requests from the HttpClient and add the appropriate access tokens to it, depending on who is logged in.
+
+\subsubsection{FakeAuthenticationProvider}
+
+The FakeAuthenticationProvider injection is of the scoped type, which means the objects are the same for a given request but differ acress each new request.
+
+This provider contains a list of fake identities. These are fetched from the Server with the GetIdentities method.
+
+The fake identities are now set and one of these names can be picked to login. ChangeAuthenticationState method. After doing so, a request is sent to the Server to fetch the login credentials.
+
+\subsubsection{AccessControl}
+
+Lastly, the AccessControl razor component is taken out of the Client project and dropped into the FakeAuth.Client. This component contains the injected FakeAuthenticationProvider, and displays the different identities to choose from. On clicking one of these the ChangeAuthenticationState method is called.
+
+\section{Server code}
+\label{ch:package-server}
+
+After explaining the basic flow of the packages, let's delve a little deeper into the ideas of these classes and how their functionality works exactly. Each file in the packages will have a subsection dedicated to it, and will contain the code of said file.
+
+\subsection{Program.cs}
+
+As this is the place where the fake authentication is implemented into the Server side, it is necessary to keep it as short as possible. Because the if-statement isn't actually necessary, but just a cautionary matter, only two lines of code, except for the configuration in the appsettings.Development.json, that need to be written to implement the fake authentication method.
+
+\subsubsection{Code}
+
+\begin{verbatim}
+    if (builder.Environment.IsDevelopment())
+    {
+        builder.Services.AddSingleton<JwtTokenGeneratorService>();
+        builder.AddFakeAuthentication<JwtTokenGeneratorService, JwtAuthenticationHandler>();
+    }
+\end{verbatim}
+
+\subsubsection{Configuring the package}
+
+When implementing the package it has a couple options in configuration. Initially the thought was to implement these configurations in the AuthenticationSchemeOptions of the AuthenticationHandler, but this would only mean that more code was going to have to be written for the user. The best option for configuration seemed to be the appsettings.json file, but since this package is only run in development mode, using the appsettings.Development.json file is even cleaner.
+
+If the package wants to be customized, the following items can be added to the appsettings.Development.json file.
+
+\begin{enumerate}
+    \item FakeIdentities
+    \item Jwt
+\end{enumerate}
+
+'FakeIdentities' is an array of key-value pairs and contains at least a 'Name' and 'Role'. An optional 'Claims' key can be added if wanted. This 'Claims' key is also an array, with each item containing a 'Type' and 'Value'. Noticeable is that an Anonymous identity isn't needed. This is because it will automatically be added if it is not present here.
+
+The second key is 'Jwt' and is used to generate JWT tokens using the JwtConfig. This one is of course only necessary if the token generator and authentication handler are of the Jwt type. This 'Jwt' key should contain an `Issuer`, `Audience`, `Key` and `Duration`.
+
+\begin{verbatim}
+    {
+        "Logging": {
+            "LogLevel": {
+                "Default": "Trace",
+                "Microsoft.AspNetCore": "Warning"
+            }
+        },
+        "FakeIdentities": [
+            {
+                "Name": "Administrator",
+                "Role": "Administrator",
+                "Claims": [
+                {
+                    "Type": "Identifier",
+                    "Value": "1"
+                },
+                {
+                    "Type": "Email",
+                    "Value": "fake-administrator@gmail.com"
+                }
+                ]
+            },
+            {
+                "Name": "Customer",
+                "Role": "Customer",
+                "Claims": [
+                {
+                    "Type": "Identifier",
+                    "Value": "2"
+                },
+                {
+                    "Type": "Email",
+                    "Value": "fake-customer@gmail.com"
+                },
+                {
+                    "Type": "ExtraClaim",
+                    "Value": "Value of extra claim"
+                }
+                ]
+            }
+        ],
+        "Jwt": {
+            "Issuer": "com.acme",
+            "Audience": "*",
+            "Key": "abcdefghabcdefghabcdefghabcdefghabcdefghabcdefghabcdefghabcdefgh",
+            "Duration": 3600
+        }
+    }
+    
+\end{verbatim}
+
+\subsection{FakeAuthServerExtensions}
+
+This static class only has one method, which is used in the Server of the application to implement the fake authentication functionality. It receives two type arguments, one is an ITokenGeneratorService, and the other an AuthenticationHandler.
+
+This file is used to create all dependency injections for the package. First off, the information of the appsettings file is loaded into the configuration variable. This variable is used to create the identities, and the jwtConfig file if present. The following dependency injections are then done:
+
+\begin{enumerate}
+    \item identities if present
+    \item FakeIdentityService
+    \item jwtConfig if present
+    \item ITokenGeneratorService
+\end{enumerate}
+
+Lastly the authentication is added with the chosen AuthenticationHandler and `Fake Authentication` scheme name. This name is centralized in the static Scheme class.
+
+\subsubsection{Code}
+
+\begin{verbatim}
+    using FakeAuth.Server.Services;
+    using FakeAuth.Server.Services.Identity;
+    using FakeAuth.Server.Services.Token;
+    using FakeAuth.Server.Services.Token.JWT;
+    using FakeAuth.Shared;
+    using Microsoft.AspNetCore.Authentication;
+    using Microsoft.AspNetCore.Builder;
+    using Microsoft.Extensions.Configuration;
+    using Microsoft.Extensions.DependencyInjection;
+    
+    namespace FakeAuth.Server.Extensions;
+    
+    public static class FakeAuthServerExtensions
+    {
+        public static void AddFakeAuthentication<T, A>(this WebApplicationBuilder builder)
+        where T : ITokenGeneratorService
+        where A : AuthenticationHandler<AuthenticationSchemeOptions>
+        {
+            var configuration = builder.Configuration;
+            
+            var identities = configuration.GetSection("FakeIdentities").Get<List<FakeIdentity>>();
+            if (identities != null)
+            builder.Services.AddSingleton(identities);
+            
+            builder.Services.AddSingleton<FakeIdentityService>();
+            
+            if (typeof(T) == typeof(JwtTokenGeneratorService) && typeof(A) == typeof(JwtAuthenticationHandler))
+            {
+                var jwtConfig = configuration.GetSection("JWT").Get<JwtConfig>();
+                if (jwtConfig != null)
+                builder.Services.AddSingleton(jwtConfig);
+            }
+            
+            builder.Services.AddSingleton<ITokenGeneratorService>(sp => sp.GetRequiredService<T>());
+            
+            // (Fake) Authentication
+            builder.Services.AddAuthentication(Scheme.Name)
+            .AddScheme<AuthenticationSchemeOptions, A>(Scheme.Name, null);
+        }
+    }
+\end{verbatim}
+
+\subsection{FakeIdentity}
+
+This class is used to store identities read from the appsettings file. It contains a standard name and role for the anonymous user, a Name and Role string and a list of UserClaim objects. These UserClaim objects hold a Type and Value, and also a way of translating these types to objects of the type Claim, which can be used to authorize routes.
+
+The only method that might need explaining in this class is the ToClaimsIdentity method. This method takes the list of UserClaim, maps it using its ToClaim method to the type Claim, and then adds these to a List variable. These were the extra Claims that could have been added in the Claims part of the appsettings file. After this the name and role are also added.
+
+\subsubsection{Code}
+
+\begin{verbatim}
+    using System.Security.Claims;
+    using FakeAuth.Shared;
+    
+    namespace FakeAuth.Server.Services.Identity;
+    
+    public class FakeIdentity
+    {
+        private const string _anonymousName = "Anonymous";
+        
+        private const string _anonymousRole = "Anonymous";
+        
+        public string Name { get; set; } = _anonymousName;
+        
+        public string Role { get; set; } = _anonymousRole;
+        
+        public List<UserClaim> Claims { get; set; } = new();
+        
+        public ClaimsIdentity ToClaimsIdentity(string? authenticationType = null)
+        {
+            var claims = Claims.Select(x => x.ToClaim()).ToList();
+            claims.Add(new Claim(ClaimTypes.Name, Name));
+            claims.Add(new Claim(ClaimTypes.Role, Role));
+            
+            return new ClaimsIdentity(claims, authenticationType, Name, Role);
+        }
+        
+        public bool IsAnonymous()
+        {
+            return Role == _anonymousRole;
+        }
+        
+        public FakeIdentityDto.Index ToIndexDto()
+        {
+            return new FakeIdentityDto.Index(Name, Role);
+        }
+    }
+\end{verbatim}
+
+\begin{verbatim}
+    using System.Security.Claims;
+    
+    namespace FakeAuth.Server.Services.Identity;
+    
+    public class UserClaim
+    {
+        public string Type { get; set; }
+        public string Value { get; set; }
+        
+        public Claim ToClaim()
+        {
+            return Type switch
+            {
+                "Identifier" => new Claim(ClaimTypes.NameIdentifier, Value),
+                "Name" => new Claim(ClaimTypes.Name, Value),
+                "Email" => new Claim(ClaimTypes.Email, Value),
+                "Role" => new Claim(ClaimTypes.Role, Value),
+                _ => new Claim(Type, Value)
+            };
+        }
+}
+\end{verbatim}
+
+\subsection{Token}
+
+This is a simple class cre
+
+\subsubsection{Code}
+
+\begin{verbatim}
+    using FakeAuth.Server.Services.Identity;
+    
+    namespace FakeAuth.Server.Services.Token;
+    
+    public class Token
+    {
+        public Token(string tokenString, int duration, FakeIdentity issuedFor, string tokenType)
+        {
+            TokenString = tokenString;
+            Duration = duration;
+            IssuedFor = issuedFor;
+            TokenType = tokenType;
+        }
+        
+        public string TokenString { get; set; }
+        
+        public int Duration { get; set; }
+        
+        public FakeIdentity IssuedFor { get; set; }
+        
+        public string TokenType { get; set; }
+    }
+\end{verbatim}
+
+\subsection{ITokenGeneratorService}
+
+For this interface the JwtTokenGeneratorService is used as an example of how the ITokenGeneratorService works. The JwtTokenGeneratorService has an extra injected JwtConfig item, since this information is needed to create a signed token. The only method this service has is GenerateToken. This turns a FakeIdentity into a Token. All information is read from the jwtConfig, the key is used to create SigningCredentials all this information is poured into a SecurityTokenDescriptor, and with the JwtSecurityTokenHandler a tokenString is created and returned in a Token object, together with the rest of the information needed further on.
+
+The fact the generating of a token is done by an interface, makes it incredibly easy to implement different types of token generating. Only one extra class is needed to be written to have a useable token. 
+
+\subsubsection{Code}
+
+\begin{verbatim}
+    using System.IdentityModel.Tokens.Jwt;
+    using FakeAuth.Server.Services.Identity;
+    using Microsoft.IdentityModel.Tokens;
+    
+    namespace FakeAuth.Server.Services.Token.JWT;
+    
+    public class JwtTokenGeneratorService : ITokenGeneratorService
+    {
+        private readonly JwtConfig jwtConfig;
+        
+        public JwtTokenGeneratorService(JwtConfig jwtConfig)
+        {
+            this.jwtConfig = jwtConfig;
+        }
+        
+        public Token GenerateToken(FakeIdentity identity)
+        {
+            var issuer = jwtConfig.Issuer;
+            var audience = jwtConfig.Audience;
+            var durationInSeconds = jwtConfig.Duration;
+            var key = jwtConfig.GetKeyAsBytes();
+            var signingCredentials = new SigningCredentials(new SymmetricSecurityKey(key), SecurityAlgorithms.HmacSha512Signature);
+            
+            var tokenDescriptor = new SecurityTokenDescriptor
+            {
+                Subject = identity.ToClaimsIdentity(),
+                Expires = DateTime.UtcNow.AddSeconds(durationInSeconds),
+                Issuer = issuer,
+                Audience = audience,
+                SigningCredentials = signingCredentials
+            };
+            var tokenHandler = new JwtSecurityTokenHandler();
+            var token = tokenHandler.CreateToken(tokenDescriptor);
+            
+            var tokenString = tokenHandler.WriteToken(token);
+            
+            return new Token(tokenString, durationInSeconds, identity, "Bearer");
+        }
+    }
+\end{verbatim}
+
+\subsection{FakeIdentityService}
+
+This service contains the list of FakeIdentity objects that is used across the application. These identities are passed into the constructor and if these don't contain an Anonymous one, it is automatically added to the list. The FindIdentityForName method returns the FakeIdentity matching that name.
+
+\subsubsection{Code}
+
+\begin{verbatim}
+    namespace FakeAuth.Server.Services.Identity;
+    
+    public class FakeIdentityService
+    {
+        public readonly List<FakeIdentity> Identities;
+        
+        public FakeIdentityService(List<FakeIdentity> identities)
+        {
+            Identities = identities;
+            // Always add an anonymous identity by default
+            CreateAnonymousIdentityIfNeeded();
+        }
+        
+        public FakeIdentity? FindIdentityForName(string identifier)
+        {
+            // We assume that identity name is case insensitive for ease of use purposes. This is fake auth after all
+            return Identities.Find(identity => string.Equals(identifier, identity.Name, StringComparison.InvariantCultureIgnoreCase));
+        }
+        
+        private void CreateAnonymousIdentityIfNeeded()
+        {
+            if (Identities.Exists(identity => identity.IsAnonymous())) return;
+            Identities.Add(new FakeIdentity());
+        }
+    }
+\end{verbatim}
+
+\subsection{AuthenticationHandler}
+
+As was the case with the FakeIdentityService, the JWT version of this file will be looked at. In these files the FakeIdentityService is always injected, and in the case of JWT the JwtConfig is also injected.
+
+These classes also only have one method. HandleAuthenticateAsync intercepts requests coming in and turns the Authorization header into an AuthenticateResult. In the case of JWT, this is done by creating another securityKey from the jwtConfig, and the ValidateToken method throws an error if the secret has been tampered with, expired or if any other issue occurred with it. When this error is caught, a NoResult is returned, meaning there is no authentication with this request. Anything past the `Token is valid` comment means an identity is present and the ClaimsPrincipal returned from the ValidateToken. The Name is extracted and used to get the FakeIdentity from the FakeIdentityService. A new ClaimsPrincipal is created from this identity and this is used to return an AuthenticationTicket that is returned in an AuthenticateResult.Success.
+
+\subsubsection{Code}
+
+\begin{verbatim}
+    using System.IdentityModel.Tokens.Jwt;
+    using System.Security.Claims;
+    using System.Text.Encodings.Web;
+    using FakeAuth.Server.Services.Identity;
+    using Microsoft.AspNetCore.Authentication;
+    using Microsoft.Extensions.Logging;
+    using Microsoft.Extensions.Options;
+    using Microsoft.IdentityModel.Tokens;
+    
+    namespace FakeAuth.Server.Services.Token.JWT;
+    
+    public class JwtAuthenticationHandler : AuthenticationHandler<AuthenticationSchemeOptions>
+    {
+        private readonly FakeIdentityService fakeIdentityService;
+        
+        private readonly JwtConfig jwtConfig;
+        
+        public JwtAuthenticationHandler(
+        IOptionsMonitor<AuthenticationSchemeOptions> options,
+        ILoggerFactory logger,
+        UrlEncoder encoder,
+        ISystemClock clock,
+        FakeIdentityService fakeIdentityService,
+        JwtConfig jwtConfig
+        ) : base(options, logger, encoder, clock)
+        {
+            this.fakeIdentityService = fakeIdentityService;
+            this.jwtConfig = jwtConfig;
+        }
+        
+        protected override async Task<AuthenticateResult> HandleAuthenticateAsync()
+        {
+            if (!Context.Request.Headers.TryGetValue("Authorization", out var authHeader))
+            return await Task.FromResult(AuthenticateResult.NoResult());
+            
+            var accessToken = authHeader.FirstOrDefault()?[7..];
+            if (accessToken == null)
+            return await Task.FromResult(AuthenticateResult.NoResult());
+            
+            try
+            {
+                var jwtHandler = new JwtSecurityTokenHandler();
+                var securityKey = new SymmetricSecurityKey(jwtConfig.GetKeyAsBytes());
+                var tokenValidationParameters = new TokenValidationParameters
+                {
+                    ValidateIssuerSigningKey = true,
+                    IssuerSigningKey = securityKey,
+                    ValidateIssuer = false,
+                    ValidateAudience = false,
+                    ClockSkew = TimeSpan.Zero
+                };
+                
+                var claimsPrincipal = jwtHandler.ValidateToken(accessToken, tokenValidationParameters, out var validatedToken);
+                // Token is valid
+                var nameIdentifier = claimsPrincipal.Claims.First(c => c.Type == ClaimTypes.Name).Value;
+                
+                var fakeIdentity = fakeIdentityService.FindIdentityForName(nameIdentifier);
+                if (fakeIdentity == null)
+                return await Task.FromResult(AuthenticateResult.NoResult());
+                
+                var identity = fakeIdentity.ToClaimsIdentity(Scheme.Name);
+                var principal = new ClaimsPrincipal(identity);
+                var ticket = new AuthenticationTicket(principal, Scheme.Name);
+                return await Task.FromResult(AuthenticateResult.Success(ticket));
+            }
+            catch (SecurityTokenException)
+            {
+                return await Task.FromResult(AuthenticateResult.NoResult());
+            }
+        }
+    }
+\end{verbatim}
+
+\subsection{FakeAuthController}
+
+This controller contains the routes for getting all identities and logging in with these identities. The FakeIdentityService and ITokenGeneratorService are injected. The first route is /api/fake-login/identities and returns a list of FakeIdentityDto.Index objects created from the fake identities present in the service. The second route is /api/fake-login/login/{name}. This returns a FakeIdentityDto.Credentials object containing the token created by the ITokenGeneratorService if the name is found.
+
+\subsubsection{Code}
+
+\begin{verbatim}
+    using FakeAuth.Server.Services.Identity;
+    using FakeAuth.Server.Services.Token;
+    using FakeAuth.Shared;
+    using Microsoft.AspNetCore.Authorization;
+    using Microsoft.AspNetCore.Mvc;
+    
+    namespace FakeAuth.Server.Controllers;
+    
+    // using Swashbuckle.AspNetCore.Annotations;
+    
+    [ApiController]
+    [Route("api/fake-login")]
+    public class FakeLoginController : ControllerBase
+    {
+        private readonly FakeIdentityService fakeIdentityService;
+        
+        private readonly ITokenGeneratorService tokenGeneratorService;
+        
+        public FakeLoginController(FakeIdentityService fakeIdentityService, ITokenGeneratorService tokenGeneratorService)
+        {
+            this.fakeIdentityService = fakeIdentityService;
+            this.tokenGeneratorService = tokenGeneratorService;
+        }
+        
+        // [SwaggerOperation("Returns a list of products available in the bogus catalog.")]
+        [HttpGet("identities")]
+        [AllowAnonymous]
+        public IEnumerable<FakeIdentityDto.Index> GetIdentities()
+        {
+            return fakeIdentityService.Identities.Select(identity => identity.ToIndexDto());
+        }
+        
+        [HttpGet("identities/me")]
+        [Authorize(AuthenticationSchemes = Scheme.Name)]
+        public IActionResult GetIdentity()
+        {
+            var user = HttpContext.User;
+            var identifier = user.Identities.First(identity => identity.AuthenticationType == Scheme.Name).Name;
+            
+            if (identifier == null) return NotFound();
+            
+            var fakeIdentity = fakeIdentityService.FindIdentityForName(identifier);
+            if (fakeIdentity == null) return NotFound();
+            
+            return Ok(fakeIdentity);
+        }
+        
+        [HttpPost("login/{identifier}")]
+        [AllowAnonymous]
+        public IActionResult Login(string identifier)
+        {
+            var fakeIdentity = fakeIdentityService.FindIdentityForName(identifier);
+            if (fakeIdentity == null) return Unauthorized();
+            
+            var token = tokenGeneratorService.GenerateToken(fakeIdentity);
+            
+            var loginObject = new FakeIdentityDto.Credentials(
+            token.TokenString,
+            token.TokenType,
+            token.Duration,
+            token.IssuedFor.Name,
+            token.IssuedFor.Role
+            );
+            
+            return Ok(loginObject);
+        }
+    }
+\end{verbatim}
+
+\section{Client code}
+\label{ch:package-client}
+
+\section{Shared code}
+\label{ch:package-shared}

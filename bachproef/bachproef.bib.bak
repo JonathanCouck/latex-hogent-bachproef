@@ -207,11 +207,4 @@
   url    = {https://learn.microsoft.com/en-us/nuget/nuget-org/publish-a-package},
 }
 
-@Article{Magnusson2022,
-  author = {Andrew Magnusson},
-  date   = {2022-12-09},
-  title  = {What is AAA Security? Authentication, Authorization, and Accounting},
-  url    = {https://www.strongdm.com/blog/aaa-security},
-}
-
 @Comment{jabref-meta: databaseType:biblatex;}
